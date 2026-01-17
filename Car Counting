@@ -1,0 +1,103 @@
+import cv2
+from ultralytics import YOLO
+
+
+model = YOLO("yolo11l.pt")
+source = "car_count.mp4"
+
+cap = cv2.VideoCapture(source)
+if not cap.isOpened():
+    raise RuntimeError(f"Could not open video: {source}")
+
+LINE_Y = 409
+car_count = 0
+counted_ids = set()
+prev_y = {}
+fps = cap.get(cv2.CAP_PROP_FPS)
+
+
+
+while True:
+    ret, frame = cap.read()
+    if not ret:
+        break
+
+    results = model.track(
+        frame,
+        persist=True,
+        conf=0.4,
+        tracker="bytetrack.yaml",
+    )
+
+    
+    cv2.line(frame, (0, LINE_Y), (frame.shape[1], LINE_Y), (255, 50, 255), 6)
+    cv2.line(frame, (0, LINE_Y), (frame.shape[1], LINE_Y), (255, 0, 200), 2)
+
+    if results[0].boxes is not None:
+        for box in results[0].boxes:
+            if box.id is None:
+                continue
+
+            track_id = int(box.id[0])
+            cls = int(box.cls[0])
+            label = model.names[cls]
+            x1, y1, x2, y2 = map(int, box.xyxy[0])
+
+            cx = (x1 + x2) // 2
+            cy = (y1 + y2) // 2
+
+            # init previous Y
+            if track_id not in prev_y:
+                prev_y[track_id] = cy
+                continue
+
+   
+            if prev_y[track_id] < LINE_Y and cy >= LINE_Y:
+                if track_id not in counted_ids:
+                    counted_ids.add(track_id)
+                    car_count += 1
+                    print(f"Car {track_id} counted → total: {car_count}")
+
+            prev_y[track_id] = cy
+
+       
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 220), 2)
+
+            # Center point
+            cv2.circle(frame, (cx, cy), 5, (0, 0, 255), -1)
+
+            # ID text with shadow
+            cv2.putText(
+                frame, f"{label} ID:{track_id}",
+                (x1 + 2, y1 - 3),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6, (0, 0, 0), 3
+            )
+            cv2.putText(
+                frame, f"{label} ID:{track_id}",
+                (x1, y1 - 5),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6, (255, 255, 255), 1
+            )
+
+ 
+    cv2.putText(
+        frame, f"Cars: {car_count}",
+        (42, 42),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        1.1, (0, 0, 0), 4
+    )
+    cv2.putText(
+        frame, f"Cars: {car_count}",
+        (40, 40),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        1.1, (0, 255, 180), 2
+    )
+
+    cv2.imshow("Car Counter | ByteTrack", frame)
+
+    if cv2.waitKey(1) & 0xFF == ord("q"):
+        break
+
+cap.release()
+cv2.destroyAllWindows()
